@@ -28,7 +28,7 @@ export class SimulatorService {
       const hex = this.generateHex()
       const topic = `${configuration.mqtt.topicPrefix}/${probeId}`
 
-      if (this.mqttService.isConnected()) {
+      if (this.mqttService.isClientConnected()) {
         this.mqttService.publish(topic, hex)
       } else {
         this.parserService.parseAndEmit(probeId, hex)

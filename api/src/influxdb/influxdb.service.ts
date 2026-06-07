@@ -1,15 +1,38 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common'
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common'
 import type { SensorReading, AggregatedBatch, OnlineStats } from '../types.js'
 import { PROBE_REGISTRY } from '../farm-data/probe-registry.js'
+import { TokenBucket } from '../common/token-bucket.js'
+import configuration from '../config/configuration.js'
+
+const MAX_MEMORY_PER_PROBE = 100
 
 @Injectable()
-export class InfluxDbService implements OnModuleInit {
+export class InfluxDbService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(InfluxDbService.name)
   private memoryStore: Map<string, SensorReading[]> = new Map()
   private influxAvailable = false
   private writeApi: any = null
   private queryApi: any = null
   private PointClass: any = null
+
+  private writeBucket: TokenBucket
+  private highWatermark: number
+  private lowWatermark: number
+  private pendingWriteQueue: SensorReading[] = []
+  private flushInterval: NodeJS.Timeout | null = null
+  private isBackpressured = false
+  private totalWrites = 0
+  private totalDropped = 0
+  private totalInfluxWrites = 0
+  private totalInfluxFailures = 0
+  private statsInterval: NodeJS.Timeout | null = null
+
+  constructor() {
+    const cfg = configuration.influxdb
+    this.writeBucket = new TokenBucket(cfg.writeBucketCapacity, cfg.writeBucketRefillPerSec)
+    this.highWatermark = cfg.highWatermark
+    this.lowWatermark = cfg.lowWatermark
+  }
 
   async onModuleInit() {
     try {
@@ -22,6 +45,12 @@ export class InfluxDbService implements OnModuleInit {
         flushInterval: 10000,
         maxRetries: 0,
       })
+      this.writeApi.on('failedRequest', () => {
+        if (this.influxAvailable) {
+          this.influxAvailable = false
+          this.logger.warn('InfluxDB write failed — switching to memory-only mode')
+        }
+      })
       this.queryApi = influx.getQueryApi(config.influxdb.org)
       this.influxAvailable = true
       this.logger.log('InfluxDB client initialized (writes will be attempted)')
@@ -29,30 +58,49 @@ export class InfluxDbService implements OnModuleInit {
       this.influxAvailable = false
       this.logger.warn('InfluxDB unavailable — using in-memory store only')
     }
+
+    this.flushInterval = setInterval(() => this.flushPendingWrites(), 5000)
+    this.statsInterval = setInterval(() => this.logWriteStats(), 30000)
+  }
+
+  onModuleDestroy() {
+    if (this.flushInterval) {
+      clearInterval(this.flushInterval)
+      this.flushInterval = null
+    }
+    if (this.statsInterval) {
+      clearInterval(this.statsInterval)
+      this.statsInterval = null
+    }
+    this.flushPendingWrites()
   }
 
   write(reading: SensorReading): void {
+    this.totalWrites++
+
     const arr = this.memoryStore.get(reading.probeId) ?? []
     arr.push(reading)
-    if (arr.length > 100) arr.shift()
+    if (arr.length > MAX_MEMORY_PER_PROBE) {
+      arr.splice(0, arr.length - MAX_MEMORY_PER_PROBE)
+    }
     this.memoryStore.set(reading.probeId, arr)
 
-    if (this.influxAvailable && this.writeApi && this.PointClass) {
-      try {
-        const point = new this.PointClass('soil_reading')
-          .tag('probeId', reading.probeId)
-          .tag('fieldId', reading.fieldId)
-          .floatField('nitrogen', reading.nitrogen)
-          .floatField('phosphorus', reading.phosphorus)
-          .floatField('potassium', reading.potassium)
-          .floatField('conductivity', reading.conductivity)
-          .floatField('temperature', reading.temperature)
-          .floatField('moisture', reading.moisture)
-          .timestamp(new Date(reading.timestamp))
-        this.writeApi.writePoint(point)
-      } catch {
-        this.influxAvailable = false
+    if (!this.writeBucket.tryConsume(1)) {
+      this.totalDropped++
+      if (this.totalDropped % 100 === 1) {
+        this.logger.warn(`InfluxDB write throttled: total_dropped=${this.totalDropped} pending=${this.pendingWriteQueue.length}`)
       }
+      return
+    }
+
+    this.pendingWriteQueue.push(reading)
+    if (this.pendingWriteQueue.length > this.highWatermark) {
+      this.isBackpressured = true
+      this.logger.warn(`Write queue at ${this.pendingWriteQueue.length} (high watermark: ${this.highWatermark}) — backpressure active`)
+    }
+
+    if (this.pendingWriteQueue.length >= 100) {
+      this.flushPendingWrites()
     }
   }
 
@@ -125,6 +173,59 @@ export class InfluxDbService implements OnModuleInit {
       }
     }
     return { online, offline, total: online + offline }
+  }
+
+  getWriteStats() {
+    return {
+      totalWrites: this.totalWrites,
+      totalDropped: this.totalDropped,
+      totalInfluxWrites: this.totalInfluxWrites,
+      totalInfluxFailures: this.totalInfluxFailures,
+      pendingQueueLength: this.pendingWriteQueue.length,
+      isBackpressured: this.isBackpressured,
+      bucketAvailable: this.writeBucket.available(),
+    }
+  }
+
+  private flushPendingWrites(): void {
+    if (this.pendingWriteQueue.length === 0) return
+
+    const batch = this.pendingWriteQueue.splice(0, Math.min(this.pendingWriteQueue.length, 200))
+
+    if (this.pendingWriteQueue.length <= this.lowWatermark) {
+      this.isBackpressured = false
+    }
+
+    if (!this.influxAvailable || !this.writeApi || !this.PointClass) return
+
+    for (const reading of batch) {
+      try {
+        const point = new this.PointClass('soil_reading')
+          .tag('probeId', reading.probeId)
+          .tag('fieldId', reading.fieldId)
+          .floatField('nitrogen', reading.nitrogen)
+          .floatField('phosphorus', reading.phosphorus)
+          .floatField('potassium', reading.potassium)
+          .floatField('conductivity', reading.conductivity)
+          .floatField('temperature', reading.temperature)
+          .floatField('moisture', reading.moisture)
+          .timestamp(new Date(reading.timestamp))
+        this.writeApi.writePoint(point)
+        this.totalInfluxWrites++
+      } catch {
+        this.totalInfluxFailures++
+        this.influxAvailable = false
+      }
+    }
+  }
+
+  private logWriteStats(): void {
+    if (this.totalWrites === 0) return
+    this.logger.log(
+      `Write stats: total=${this.totalWrites} dropped=${this.totalDropped} ` +
+      `influx_ok=${this.totalInfluxWrites} influx_fail=${this.totalInfluxFailures} ` +
+      `pending=${this.pendingWriteQueue.length} backpressured=${this.isBackpressured}`,
+    )
   }
 
   private averageReadings(readings: SensorReading[]): SensorReading[] {

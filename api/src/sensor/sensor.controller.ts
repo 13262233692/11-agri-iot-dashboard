@@ -1,11 +1,15 @@
 import { Controller, Get, Param, Query } from '@nestjs/common'
 import { InfluxDbService } from '../influxdb/influxdb.service.js'
+import { MqttService } from '../mqtt/mqtt.service.js'
 import { PROBE_REGISTRY } from '../farm-data/probe-registry.js'
 import type { ProbeInfo, SensorReading } from '../types.js'
 
 @Controller('sensors')
 export class SensorController {
-  constructor(private readonly influxDbService: InfluxDbService) {}
+  constructor(
+    private readonly influxDbService: InfluxDbService,
+    private readonly mqttService: MqttService,
+  ) {}
 
   @Get()
   getAll(): ProbeInfo[] {
