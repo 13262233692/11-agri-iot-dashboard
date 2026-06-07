@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/commo
 import { EventEmitter } from 'events'
 import * as mqtt from 'mqtt'
 import { ParserService } from '../parser/parser.service.js'
+import { VpdControlService } from '../vpd-control/vpd-control.service.js'
 import configuration from '../config/configuration.js'
 import { ExponentialBackoff } from '../common/exponential-backoff.js'
 import { TokenBucket } from '../common/token-bucket.js'
@@ -29,7 +30,10 @@ export class MqttService extends EventEmitter implements OnModuleInit, OnModuleD
   private totalMessagesReceived = 0
   private totalMessagesThrottled = 0
 
-  constructor(private readonly parserService: ParserService) {
+  constructor(
+    private readonly parserService: ParserService,
+    private readonly vpdControlService: VpdControlService,
+  ) {
     super()
     const cfg = configuration.mqtt
     this.connectionBackoff = new ExponentialBackoff(cfg.backoffBaseMs, cfg.backoffMaxMs, cfg.backoffJitter)
@@ -39,6 +43,10 @@ export class MqttService extends EventEmitter implements OnModuleInit, OnModuleD
   async onModuleInit() {
     this.connectWithBackoff()
     this.statsInterval = setInterval(() => this.logThrottleStats(), 30000)
+
+    this.vpdControlService.on('control:command', ({ topic, payload }: { topic: string; payload: string }) => {
+      this.publish(topic, payload)
+    })
   }
 
   onModuleDestroy() {

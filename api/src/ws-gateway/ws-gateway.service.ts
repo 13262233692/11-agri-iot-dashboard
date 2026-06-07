@@ -3,9 +3,10 @@ import { WebSocketGateway, WebSocketServer, SubscribeMessage } from '@nestjs/web
 import { Server, Socket } from 'socket.io'
 import { InfluxDbService } from '../influxdb/influxdb.service.js'
 import { AlertService } from '../alert/alert.service.js'
+import { VpdControlService } from '../vpd-control/vpd-control.service.js'
 import { TokenBucket } from '../common/token-bucket.js'
 import configuration from '../config/configuration.js'
-import type { AlertEvent } from '../types.js'
+import type { AlertEvent, VpdReading, ControlAction } from '../types.js'
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -27,6 +28,7 @@ export class WsGatewayService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly influxDbService: InfluxDbService,
     private readonly alertService: AlertService,
+    private readonly vpdControlService: VpdControlService,
   ) {
     const cfg = configuration.ws
     this.maxConnections = cfg.maxConnections
@@ -37,6 +39,16 @@ export class WsGatewayService implements OnModuleInit, OnModuleDestroy {
     this.alertService.on('alert', (alert: AlertEvent) => {
       if (this.connectedClients.size === 0) return
       this.throttledEmit('sensor:alert', alert)
+    })
+
+    this.vpdControlService.on('vpd:update', (vpd: VpdReading) => {
+      if (this.connectedClients.size === 0) return
+      this.throttledEmit('vpd:update', vpd)
+    })
+
+    this.vpdControlService.on('control:action', (action: ControlAction) => {
+      if (this.connectedClients.size === 0) return
+      this.throttledEmit('control:action', action)
     })
 
     this.pushInterval = setInterval(() => {
@@ -66,10 +78,16 @@ export class WsGatewayService implements OnModuleInit, OnModuleDestroy {
     const latestReadings = Object.fromEntries(this.influxDbService.getLatestReadings())
     const onlineStats = this.influxDbService.getOnlineStats()
     const recentAlerts = this.alertService.getRecentAlerts()
+    const vpdReadings = Object.fromEntries(this.vpdControlService.getLatestVpd())
+    const controlHistory = this.vpdControlService.getControlHistory()
+    const solenoidStates = this.vpdControlService.getSolenoidStates()
 
     client.emit('sensor:latest', latestReadings)
     client.emit('sensor:online-stats', onlineStats)
     client.emit('sensor:alerts', recentAlerts)
+    client.emit('vpd:latest', vpdReadings)
+    client.emit('control:history', controlHistory)
+    client.emit('control:solenoid-states', solenoidStates)
   }
 
   handleDisconnect(client: Socket) {

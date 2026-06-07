@@ -3,10 +3,14 @@ import NpkGauges from './NpkGauges.vue'
 import TrendChart from './TrendChart.vue'
 import OnlineStats from './OnlineStats.vue'
 import MetricCards from './MetricCards.vue'
+import VpdGauge from './VpdGauge.vue'
+import ControlEventStream from './ControlEventStream.vue'
 </script>
 
 <template>
   <div class="data-panel">
+    <VpdGauge />
+    <ControlEventStream />
     <NpkGauges />
     <TrendChart />
     <div class="bottom-row">
@@ -24,7 +28,8 @@ import MetricCards from './MetricCards.vue'
   flex-direction: column;
   gap: 8px;
   padding: 8px;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .bottom-row {

@@ -39,6 +39,28 @@ export interface Alert {
   timestamp: number
 }
 
+export interface VpdReading {
+  fieldId: string
+  temperature: number
+  humidity: number
+  svp: number
+  vpd: number
+  zone: 'optimal' | 'caution' | 'critical'
+  timestamp: string
+}
+
+export interface ControlAction {
+  id: string
+  type: 'SOLENOID_OPEN' | 'SOLENOID_CLOSE'
+  fieldId: string
+  fieldName: string
+  vpd: number
+  threshold: number
+  topic: string
+  timestamp: string
+  acknowledged: boolean
+}
+
 export interface ProbeInfo {
   id: string
   fieldId: string
@@ -58,6 +80,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const wsConnected = ref(false)
   const probeRegistry = ref<Map<string, ProbeInfo>>(new Map())
   const fieldGeoJson = ref<GeoJSON.FeatureCollection | null>(null)
+  const vpdReadings = ref<Map<string, VpdReading>>(new Map())
+  const controlActions = ref<ControlAction[]>([])
+  const solenoidStates = ref<Record<string, boolean>>({})
 
   const currentAggregated = computed(() => {
     if (aggregatedReadings.value.length === 0) {
@@ -185,6 +210,31 @@ export const useDashboardStore = defineStore('dashboard', () => {
     selectedProbe.value = probeId
   }
 
+  function handleVpdUpdate(data: VpdReading) {
+    vpdReadings.value.set(data.fieldId, data)
+  }
+
+  function handleVpdLatest(data: Record<string, VpdReading>) {
+    for (const [fieldId, vpd] of Object.entries(data)) {
+      vpdReadings.value.set(fieldId, vpd)
+    }
+  }
+
+  function handleControlAction(data: ControlAction) {
+    controlActions.value.push(data)
+    if (controlActions.value.length > 50) {
+      controlActions.value = controlActions.value.slice(-50)
+    }
+  }
+
+  function handleControlHistory(data: ControlAction[]) {
+    controlActions.value = data
+  }
+
+  function handleSolenoidStates(data: Record<string, boolean>) {
+    solenoidStates.value = data
+  }
+
   return {
     readings,
     aggregatedReadings,
@@ -194,6 +244,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
     wsConnected,
     probeRegistry,
     fieldGeoJson,
+    vpdReadings,
+    controlActions,
+    solenoidStates,
     currentAggregated,
     selectedReading,
     displayReading,
@@ -206,5 +259,10 @@ export const useDashboardStore = defineStore('dashboard', () => {
     setFieldGeoJson,
     removeAlert,
     selectProbe,
+    handleVpdUpdate,
+    handleVpdLatest,
+    handleControlAction,
+    handleControlHistory,
+    handleSolenoidStates,
   }
 })

@@ -8,6 +8,7 @@ export interface SensorReading {
   conductivity: number
   temperature: number
   moisture: number
+  humidity?: number
 }
 
 export interface AggregatedBatch {
@@ -16,10 +17,34 @@ export interface AggregatedBatch {
 }
 
 export interface AlertEvent {
-  type: 'OFFLINE' | 'THRESHOLD_EXCEED' | 'DATA_ANOMALY'
+  type: 'OFFLINE' | 'THRESHOLD_EXCEED' | 'DATA_ANOMALY' | 'VPD_CRITICAL' | 'VPD_CONTROL'
   probeId: string
   message: string
   timestamp: string
+  data?: Record<string, any>
+}
+
+export interface VpdReading {
+  fieldId: string
+  temperature: number
+  humidity: number
+  svp: number
+  vpd: number
+  zone: 'optimal' | 'caution' | 'critical'
+  timestamp: string
+}
+
+export interface ControlAction {
+  id: string
+  type: 'SOLENOID_OPEN' | 'SOLENOID_CLOSE'
+  fieldId: string
+  fieldName: string
+  vpd: number
+  threshold: number
+  topic: string
+  payload: string
+  timestamp: string
+  acknowledged: boolean
 }
 
 export interface ProbeInfo {

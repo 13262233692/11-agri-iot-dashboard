@@ -3,12 +3,14 @@ import type { SensorReading } from '../types.js'
 import { getProbeFieldId, PROBE_REGISTRY } from '../farm-data/probe-registry.js'
 import { InfluxDbService } from '../influxdb/influxdb.service.js'
 import { AlertService } from '../alert/alert.service.js'
+import { VpdControlService } from '../vpd-control/vpd-control.service.js'
 
 @Injectable()
 export class ParserService {
   constructor(
     private readonly influxDbService: InfluxDbService,
     private readonly alertService: AlertService,
+    private readonly vpdControlService: VpdControlService,
   ) {}
 
   parseHex(hex: string): Partial<SensorReading> {
@@ -23,7 +25,7 @@ export class ParserService {
     }
   }
 
-  parseAndEmit(probeId: string, hex: string): void {
+  parseAndEmit(probeId: string, hex: string, extraFields?: Partial<SensorReading>): void {
     const parsed = this.parseHex(hex)
     const fieldId = getProbeFieldId(probeId)
     const reading: SensorReading = {
@@ -31,6 +33,7 @@ export class ParserService {
       fieldId,
       timestamp: new Date().toISOString(),
       ...parsed,
+      ...extraFields,
     } as SensorReading
 
     const probe = PROBE_REGISTRY.get(probeId)
@@ -42,5 +45,6 @@ export class ParserService {
 
     this.influxDbService.write(reading)
     this.alertService.check(reading)
+    this.vpdControlService.evaluate(reading)
   }
 }

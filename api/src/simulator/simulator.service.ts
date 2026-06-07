@@ -26,22 +26,27 @@ export class SimulatorService {
 
     for (const probeId of selected) {
       const hex = this.generateHex()
+      const humidity = this.generateHumidity()
       const topic = `${configuration.mqtt.topicPrefix}/${probeId}`
 
       if (this.mqttService.isClientConnected()) {
         this.mqttService.publish(topic, hex)
+        this.parserService.parseAndEmit(probeId, hex, { humidity })
       } else {
-        this.parserService.parseAndEmit(probeId, hex)
+        this.parserService.parseAndEmit(probeId, hex, { humidity })
       }
     }
   }
 
   private generateHex(): string {
+    const isStressScenario = Math.random() < 0.25
     const n = Math.round((40 + Math.random() * 40) * 10)
     const p = Math.round((20 + Math.random() * 30) * 10)
     const k = Math.round((60 + Math.random() * 60) * 10)
     const ec = Math.round(150 + Math.random() * 200)
-    const temp = Math.round((18 + Math.random() * 12) * 10)
+    const temp = isStressScenario
+      ? Math.round((35 + Math.random() * 8) * 10)
+      : Math.round((18 + Math.random() * 12) * 10)
     const moist = Math.round((20 + Math.random() * 20) * 10)
 
     const buf = Buffer.alloc(12)
@@ -53,6 +58,13 @@ export class SimulatorService {
     buf.writeUInt16BE(moist, 10)
 
     return buf.toString('hex')
+  }
+
+  private generateHumidity(): number {
+    const isStressScenario = Math.random() < 0.25
+    const base = isStressScenario ? 20 : 50
+    const range = isStressScenario ? 20 : 30
+    return Math.round((base + Math.random() * range) * 10) / 10
   }
 
   private pickRandom(arr: string[], count: number): string[] {

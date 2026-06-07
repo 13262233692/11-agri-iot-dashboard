@@ -41,6 +41,26 @@ export function useWebSocket(url: string = 'http://localhost:3000') {
     socket.on('sensor:latest', (data: any) => {
       store.handleLatest(data)
     })
+
+    socket.on('vpd:update', (data: any) => {
+      store.handleVpdUpdate(data)
+    })
+
+    socket.on('vpd:latest', (data: any) => {
+      store.handleVpdLatest(data)
+    })
+
+    socket.on('control:action', (data: any) => {
+      store.handleControlAction(data)
+    })
+
+    socket.on('control:history', (data: any) => {
+      store.handleControlHistory(data)
+    })
+
+    socket.on('control:solenoid-states', (data: any) => {
+      store.handleSolenoidStates(data)
+    })
   }
 
   function send(event: string, data?: unknown) {

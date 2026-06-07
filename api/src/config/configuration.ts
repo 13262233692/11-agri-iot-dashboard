@@ -30,6 +30,15 @@ export default {
       emitBucketRefillPerSec: parseInt(process.env.WS_EMIT_BUCKET_REFILL || '10'),
     }
   },
+  get vpd() {
+    return {
+      criticalThresholdKpa: parseFloat(process.env.VPD_CRITICAL_THRESHOLD_KPA || '1.5'),
+      cautionThresholdKpa: parseFloat(process.env.VPD_CAUTION_THRESHOLD_KPA || '1.2'),
+      sustainedReadings: parseInt(process.env.VPD_SUSTAINED_READINGS || '3'),
+      solenoidOnDurationMs: parseInt(process.env.VPD_SOLENOID_ON_DURATION_MS || '30000'),
+      controlTopicPrefix: process.env.VPD_CONTROL_TOPIC_PREFIX || 'control/solenoid',
+    }
+  },
   get simulator() {
     return {
       enabled: process.env.SIMULATOR_ENABLED === 'true',
